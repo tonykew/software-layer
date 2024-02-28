@@ -67,6 +67,7 @@ if (not found) then
         LmodError(error_message)
 end
 setenv("MATLAB_LOG_DIR","/tmp")
+setenv("FONTCONFIG_PATH","{eprefix}/etc/fonts")
 """
 
 GUROBI_MODLUAFOOTER = """
@@ -77,6 +78,30 @@ if (not found) then
         We did not find a suitable license for Gurobi. If you have access to one, you can create the file $HOME/.licenses/gurobi.lic with the license information. If you think you should have access to one, please write to ccr-help@buffalo.edu.
         ]]
         LmodError(error_message)
+end
+"""
+
+PAVILION_MODLUAFOOTER = """
+if isDir(pathJoin(os.getenv("HOME"), "testsuite/sanitarium")) then
+    setenv("PAV_CONFIG_DIR", pathJoin(os.getenv("HOME"), "testsuite/sanitarium"))
+end
+"""
+
+ANSYS_MODLUAFOOTER = """
+setenv("FONTCONFIG_PATH","{eprefix}/etc/fonts")
+setenv("QT_XKB_CONFIG_ROOT","{ebrootx11}/share/X11/xkb")
+
+require("SitePackage")
+local found, path = find_and_define_license_file("__ANSYS_LICENSE_FILE", "ansys")
+if (not found) then
+	local error_message = [[
+We did not find a suitable license for ANSYS. If you have access to one, you can create the file $HOME/.licenses/ansys.lic with the license information. If you think you should have access to one as part of your project, contact ccr-help@buffalo.edu. For more information about configuring an ANSYS license, please see https://docs.ccr.buffalo.edu/en/latest/software/modules/#application-specific-notes#ansys
+
+	]]
+	LmodError(error_message)
+elseif (path) then
+	-- load the license file which should contain Lua commands to set the license path
+	assert(loadfile(path))()
 end
 """
 
@@ -102,9 +127,21 @@ def set_modluafooter(ec):
     if name == 'anaconda3':
         ec['modluafooter'] += (ANACONDA_MODLUAFOOTER)
 
+    if name == 'pavilion':
+        ec['modluafooter'] += (PAVILION_MODLUAFOOTER)
+
+    if name == 'ansys':
+        ebrootx11 = get_ccr_envvar('EBROOTX11')
+        ec['modluafooter'] += ANSYS_MODLUAFOOTER.format(eprefix=eprefix, ebrootx11=ebrootx11)
+
     if name == 'openmpi':
-        gccver = get_ccr_envvar('EBVERSIONGCC')
-        comp = os.path.join('MPI', 'gcc', gccver, name, ec['version'])
+        if ec['toolchain']['name'].lower() == 'nvhpc':
+            nvhpcver = get_ccr_envvar('EBVERSIONNVHPC')
+            comp = os.path.join('MPI', 'nvhpc', nvhpcver, name, ec['version'])
+        else:
+            gccver = get_ccr_envvar('EBVERSIONGCC')
+            comp = os.path.join('MPI', 'gcc', gccver, name, ec['version'])
+
         ec['modluafooter'] += MPI_MODLUAFOOTER.format(software_path=software_path, ccr_version=ccr_version, sub_path=comp)
 
     if name == 'matlab':
@@ -436,7 +473,7 @@ def matlab_postproc(ec, *args, **kwargs):
         ccr_init = get_ccr_envvar('CCR_INIT_DIR')
         ec.cfg['postinstallcmds'] = [
             'chmod -R u+w %(installdir)s',
-            f"{ccr_init}/easybuild/setrpaths.sh --path %(installdir)s --add_origin",
+            f'{ccr_init}/easybuild/setrpaths.sh --path %(installdir)s --add_origin --add_path="/opt/software/nvidia/lib64"',
         ]
         print_msg("Using custom postproc command option for %s: %s", ec.name, ec.cfg['postinstallcmds'])
     else:
@@ -473,9 +510,9 @@ def nvhpc_postproc(ec, *args, **kwargs):
         ccr_init = get_ccr_envvar('CCR_INIT_DIR')
         ec.cfg['postinstallcmds'] = [
             f'{ccr_init}/easybuild/setrpaths.sh --path %(installdir)s/Linux_x86_64/%(version)s --add_path="/opt/software/nvidia/lib64:$EBROOTCUDA/lib64:$EPREFIX/lib64"',
-            f'echo "set DEFLIBDIR=$EBROOTGCCCORE/lib64;" >> %(installdir)s/Linux_x86_64/%(version)s/compilers/bin/localrc',
+            f'echo "set DEFLIBDIR=$EPREFIX/usr/lib64;" >> %(installdir)s/Linux_x86_64/%(version)s/compilers/bin/localrc',
             f'echo "set DEFSTDOBJDIR=$EPREFIX/usr/lib64;" >> %(installdir)s/Linux_x86_64/%(version)s/compilers/bin/localrc',
-            f'sed -i "\@^set LC=@s@-lgcc@-rpath=/opt/software/nvidia/lib64:$EBROOTGCCCORE/lib64:$EPREFIX/lib64 -lgcc@" %(installdir)s/Linux_x86_64/%(version)s/compilers/bin/localrc',
+#            f'sed -i "\@^set LC=@s@-lgcc@-rpath=/opt/software/nvidia/lib64:$EBROOTGCCCORE/lib64:$EPREFIX/lib64 -lgcc@" %(installdir)s/Linux_x86_64/%(version)s/compilers/bin/localrc',
         ]
         print_msg("Using custom postproc command option for %s: %s", ec.name, ec.cfg['postinstallcmds'])
     else:
@@ -558,6 +595,102 @@ def openmolcas_postproc(ec, *args, **kwargs):
     else:
         raise EasyBuildError("openmolcas-specific hook triggered for non-openmolcas easyconfig?!")
 
+def paraview_postproc(ec, *args, **kwargs):
+    """Add post install cmds for paraview"""
+
+    if ec.name == 'ParaView':
+        ccr_init = get_ccr_envvar('CCR_INIT_DIR')
+        ec.cfg['postinstallcmds'] = [
+            f'{ccr_init}/easybuild/setrpaths.sh --path %(installdir)s/lib64/ --add_origin --add_path="$EBROOTGCCCORE/lib64:$EPREFIX/lib64"',
+        ]
+        print_msg("Using custom postproc command option for %s: %s", ec.name, ec.cfg['postinstallcmds'])
+    else:
+        raise EasyBuildError("paraview-specific hook triggered for non-paraview easyconfig?!")
+
+def mathematica_postproc(ec, *args, **kwargs):
+    """Add post install cmds for mathematica"""
+
+    if ec.name == 'Mathematica':
+        ccr_init = get_ccr_envvar('CCR_INIT_DIR')
+        ec.cfg['postinstallcmds'] = [
+            f'{ccr_init}/easybuild/setrpaths.sh --path %(installdir)s/SystemFiles/FrontEnd/Binaries/Linux-x86-64/ --add_origin --add_path="/opt/software/nvidia/lib64:$EBROOTX11/lib64:$EBROOTFREETYPE/lib64:$EBROOTFONTCONFIG/lib64:$EPREFIX/usr/lib64:$EPREFIX/lib64"',
+            f'{ccr_init}/easybuild/setrpaths.sh --path %(installdir)s/SystemFiles/Libraries/Linux-x86-64/Qt/lib/ --add_path="/opt/software/nvidia/lib64:$EBROOTX11/lib64:$EPREFIX/usr/lib64:$EPREFIX/lib64"',
+        ]
+        print_msg("Using custom postproc command option for %s: %s", ec.name, ec.cfg['postinstallcmds'])
+    else:
+        raise EasyBuildError("mathematica-specific hook triggered for non-mathematica easyconfig?!")
+
+def cupy_postproc(ec, *args, **kwargs):
+    """Add post install cmds for cupy."""
+
+    if ec.name == 'CuPy':
+        ccr_init = get_ccr_envvar('CCR_INIT_DIR')
+        ec.cfg['postinstallcmds'] = [
+            f'{ccr_init}/easybuild/setrpaths.sh --path %(installdir)s/lib --add_path="/opt/software/nvidia/lib64"',
+        ]
+        print_msg("Using custom postproc command option for %s: %s", ec.name, ec.cfg['postinstallcmds'])
+    else:
+        raise EasyBuildError("cupy-specific hook triggered for non-cuda easyconfig?!")
+
+def ansys_postproc(ec, *args, **kwargs):
+    """Add post install cmds for ansys"""
+
+    if ec.name == 'ANSYS':
+        ccr_init = get_ccr_envvar('CCR_INIT_DIR')
+        ec.cfg['postinstallcmds'] = [
+            # Fix setmwruntime path and X11 lib dir
+            'sed -i "s#X11_LIB_DIR=/usr/X11R6/lib64#X11_LIB_DIR=$EBROOTX11/lib#g" %(installdir)s/v231/commonfiles/MainWin/linx64/mw/setmwruntime',
+            'sed -i "s#PATH=\"\$PATH:/usr/bin/X11\"#PATH=\"$EPREFIX/bin:$EPREFIX/usr/bin:$EBROOTX11/bin:\$PATH\"#g" %(installdir)s/v231/commonfiles/MainWin/linx64/mw/setmwruntime',
+            'chmod 755 %(installdir)s/v231/commonfiles/MainWin/linx64/mw/setmwruntime',
+            # Set same perms on all directories
+            "find %(installdir)s -type d -exec chmod 755 {} \;",
+            # Set same perms on all shared libraries to avoid warning in log file
+            "find %(installdir)s -type f \( -name '*.so' -o -name '*.so.*' \) -exec chmod 755 {} \;",
+            # Rename some libs as these maybe older than system equivalents and missing new symbols
+            "find %(installdir)s \( -type f -o -type l \) -name 'libstdc++.so*' -exec mv {} {}.bak \;",
+            "find %(installdir)s \( -type f -o -type l \) -name 'libgcc_s.so*' -exec mv {} {}.bak \;",
+            "find %(installdir)s \( -type f -o -type l \) -name 'libfreetype*' -exec mv {} {}.bak \;",
+            "find %(installdir)s \( -type f -o -type l \) -name 'libgfortran.so*' -exec mv {} {}.bak \;",
+            "find %(installdir)s \( -type f -o -type l \) -name 'libgfortran.so.3*bak' -print0 | while IFS= \
+            read -r -d $'\\0' file; do echo \"Removing bak from $file\"; mv \"$file\" \"${file%.bak}\"; done;",
+            # Find all non-binary files containing  [:"]/usr/lib or [:"]/lib on one line and remove them from the paths
+            "for f in $(grep -rIl '[:\"]/usr/lib\|[:\"]/lib' %(installdir)s); do echo Modifying file $f; \
+            sed -i -e '/[:\"]\/usr\/lib/s/:*\/usr\/lib[^:\"]*//g' -e '/[:\"]\/lib/s/:*\/lib[^:\"]*//g' $f; done",
+            # Run setrpaths.sh in all directories
+            f'{ccr_init}/easybuild/setrpaths.sh --path %(installdir)s --add_path="/opt/software/nvidia/lib64:$EBROOTX11/lib64:$EBROOTGCCCORE/lib64:$EPREFIX/usr/lib64:$EPREFIX/lib64"',
+            # Run setrpaths.sh for any_interpreter
+            f"find %(installdir)s -type f \( -name 'lmutil' -o -name 'lmgrd' -o -name 'NTI' \) -exec {ccr_init}/easybuild/setrpaths.sh --path {{}} --any_interpreter \;",
+            # Avoid warning starting workbench mechanical: sh: domainname: command not found
+            "cd %(installdir)s/v231/Tools/mono/Linux64/bin; ln -s $EPREFIX/bin/hostname domainname",
+            # Replace '/bin/sh' with '$EPREFIX/bin/sh'
+            "find %(installdir)s -type f ! -size 0 -not -name 'fluent.dmp*' -not -name 'flprim.dmp*' -print0 | \
+            xargs -0 grep -riIlZ '/bin/sh' | while IFS= read -r -d $'\\0' file; do echo \"$file\"; \
+            sed -i \"s|/bin/sh|$EPREFIX/bin/sh|g\" \"$file\"; done;",
+            # Replace '/bin/bash' with '$EPREFIX/bin/bash'
+            "find %(installdir)s -type f ! -size 0 -not -name 'fluent.dmp*' -not -name 'flprim.dmp*' -print0 | \
+            xargs -0 grep -riIlZ '/bin/bash' | while IFS= read -r -d $'\\0' file; do echo \"$file\"; \
+            sed -i \"s|/bin/bash|$EPREFIX/bin/bash|g\" \"$file\"; done;",
+            # Remove /sbin/ from both of the /sbin/lspci entries inside libApipWrapper.so
+            "find %(installdir)s -type f ! -size 0 -name 'libApipWrapper.so' -print0 | xargs -0 \
+            grep -rilZ '/sbin/lspci' | while IFS= read -r -d $'\\0' file; do echo \"$file\"; \
+            perl -0777 -pe 's/\/sbin\//substr q{}.\"\\0\"x length$&,0,length$&/e or die \"pattern not found\"' -i \"$file\"; \
+            perl -0777 -pe 's/\/sbin\//substr q{}.\"\\0\"x length$&,0,length$&/e or die \"pattern not found\"' -i \"$file\"; done;",
+            # Avoid warning when starting workbench: Unit[s] is not valid for quantity Time
+            "cd %(installdir)s/v231/tp/CUEUnits/linx64/lib;\
+            mv libCUEUnits.so libCUEUnits.so-orig;\
+            ln -s ../../../../aisol/lib/linx64/libCUEUnits.so libCUEUnits.so;",
+            # Avoid cfx-pre warning: libjpeg.so.62: no version information available
+            "cd %(installdir)s/v231/tp/qt/5.9.6/linx64/lib;\
+            mv libjpeg.so.62.0.0 libjpeg.so.62.0.0-orig;\
+            mv libjpeg.so.62 libjpeg.so.62-orig;\
+            ln -s $EPREFIX/usr/lib64/libjpeg.so.62 libjpeg.so.62;",
+            # Fix ld preload errors
+            """sed -i '/^   LD_PRELOAD="${SysLibStdCpp/d' %(installdir)s/v231/ansys/bin/anssh.ini""",
+        ]
+        print_msg("Using custom postproc command option for %s: %s", ec.name, ec.cfg['postinstallcmds'])
+    else:
+        raise EasyBuildError("ansys-specific hook triggered for non-ansys easyconfig?!")
+
 PARSE_HOOKS = {
     'fontconfig': fontconfig_add_fonts,
     'UCX': ucx_eprefix,
@@ -595,4 +728,8 @@ PRE_POSTPROC_HOOKS = {
     'jax': jax_postproc,
     'NiftyPET': niftypet_postproc,
     'OpenMolcas': openmolcas_postproc,
+    'ParaView': paraview_postproc,
+    'Mathematica': mathematica_postproc,
+    'CuPy': cupy_postproc,
+    'ANSYS': ansys_postproc,
 }
