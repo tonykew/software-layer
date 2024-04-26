@@ -620,10 +620,23 @@ def mathematica_postproc(ec, *args, **kwargs):
     else:
         raise EasyBuildError("mathematica-specific hook triggered for non-mathematica easyconfig?!")
 
-def cupy_postproc(ec, *args, **kwargs):
-    """Add post install cmds for cupy."""
+def orca_postproc(ec, *args, **kwargs):
+    """Add post install cmds for orca."""
 
-    if ec.name == 'CuPy':
+    if ec.name == 'ORCA':
+        ccr_init = get_ccr_envvar('CCR_INIT_DIR')
+        ec.cfg['postinstallcmds'] = [
+            f"{ccr_init}/easybuild/setrpaths.sh --path %(installdir)s/bin --add_origin --add_path='$ORIGIN/../lib'",
+            f"{ccr_init}/easybuild/setrpaths.sh --path %(installdir)s/lib --add_origin",
+        ]
+        print_msg("Using custom postproc command option for %s: %s", ec.name, ec.cfg['postinstallcmds'])
+    else:
+        raise EasyBuildError("orca-specific hook triggered for non-orca easyconfig?!")
+
+def cupy_postproc(ec, *args, **kwargs):
+    """Add post install cmds for cupy and pycuda."""
+
+    if ec.name == 'CuPy' or ec.name == 'PyCUDA':
         ccr_init = get_ccr_envvar('CCR_INIT_DIR')
         ec.cfg['postinstallcmds'] = [
             f'{ccr_init}/easybuild/setrpaths.sh --path %(installdir)s/lib --add_path="/opt/software/nvidia/lib64"',
@@ -730,6 +743,8 @@ PRE_POSTPROC_HOOKS = {
     'OpenMolcas': openmolcas_postproc,
     'ParaView': paraview_postproc,
     'Mathematica': mathematica_postproc,
+    'ORCA': orca_postproc,
     'CuPy': cupy_postproc,
+    'PyCUDA': cupy_postproc,
     'ANSYS': ansys_postproc,
 }
